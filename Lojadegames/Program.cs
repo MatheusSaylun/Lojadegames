@@ -10,6 +10,7 @@ using Lojadegames.Models;
 using Lojadegames.Repositories;
 using Lojadegames.Services;
 using Microsoft.Data.Sqlite;
+using static Lojadegames.Repositories.UsuarioRepository;
 
 string? senha, confirmacao;
 
@@ -155,6 +156,39 @@ namespace Lojadegames.Repositories
             }
             return null;
         }
+        public static class Utils
+        {
+            public static string LerSenhaOculta()
+            {
+                string senha = "";
+                ConsoleKeyInfo tecla;
+
+                do
+                {
+                    tecla = Console.ReadKey(true); // true: não exibe o caractere
+
+                    if (tecla.Key == ConsoleKey.Enter)
+                    {
+                        Console.WriteLine();
+                        break;
+                    }
+                    else if (tecla.Key == ConsoleKey.Backspace && senha.Length > 0)
+                    {
+                        senha = senha.Substring(0, senha.Length - 1);
+                        Console.Write("\b \b");
+                    }
+                    else if (!char.IsControl(tecla.KeyChar))
+                    {
+                        senha += tecla.KeyChar;
+                        Console.Write("*"); // mostra asterisco para cada caractere
+                    }
+
+                } while (true);
+
+                return senha;
+            }
+        }
+
     }
 }
 
@@ -178,8 +212,10 @@ namespace Lojadegames.Services
             string senha, confirmacao;
             do
             {
-                Console.WriteLine("Senha: "); senha = Console.ReadLine();
-                Console.WriteLine("Confirme a senha: "); confirmacao = Console.ReadLine();
+                Console.Write("Senha: ");
+                senha = Utils.LerSenhaOculta();
+                Console.Write("Confirme a senha: ");
+                confirmacao = Utils.LerSenhaOculta();
                 if (senha != confirmacao) Console.WriteLine("Senhas não coincidem!");
             } while (senha != confirmacao);
             novo.Senha = senha;
@@ -226,3 +262,4 @@ namespace Lojadegames.Services
         }
     }
 }
+
