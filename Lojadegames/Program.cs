@@ -37,7 +37,10 @@ while (true)
             string senhaLogin = Console.ReadLine();
             var usuario = UsuarioService.FazerLogin(email, senhaLogin);
             if (usuario != null)
-                Console.WriteLine($"Bem-vindo {usuario.Nome}!");
+            {
+                Console.WriteLine($"Bem Vindo {usuario.Nome}!");
+                MenuInterno(usuario);
+            }
             else
                 Console.WriteLine("Email ou senha incorretos.");
             break;
@@ -49,6 +52,38 @@ while (true)
         default:
             Console.WriteLine("Opção inválida.");
             break;
+    }
+}
+void MenuInterno(Usuario usuario)
+{
+    while (true)
+    {
+        Console.Clear();
+        Console.WriteLine($"--- MENU PRINCIPAL --- | Usuário: {usuario.Nome} {(usuario.Ehsupervisor ? "(Supervisor)" : "")}");
+        Console.WriteLine("[1] Cadastrar produto");
+        Console.WriteLine("[2] Sair do sistema");
+        Console.Write("Escolha: ");
+
+        if (!int.TryParse(Console.ReadLine(), out int opcao))
+        {
+            Console.WriteLine("Opção inválida. Pressione Enter...");
+            Console.ReadLine();
+            continue;
+        }
+
+        switch (opcao)
+        {
+            case 1:
+                ProdutoService.CadastrarProduto();
+                break;
+            case 2:
+                Console.WriteLine("Saindo...");
+                return; // volta para o menu principal
+            default:
+                Console.WriteLine("Opção inválida. Pressione Enter...");
+                Console.ReadLine();
+                break;
+        }
     }
 }
 
@@ -90,6 +125,27 @@ namespace Lojadegames.Models
             return tel.Length >= 10 && tel.Length <= 11;
         }
     }
+    public enum CategoriaProduto
+    {
+        Jogos,
+        Acessorios,
+        ProdutosGeek
+    }
+    public class Produto
+    {
+        public int Id { get; set; }
+        public string CodigoBarras { get; set; }
+        public string Nome { get; set; }
+        public CategoriaProduto Categoria { get; set; }
+        public string Fabricante { get; set; }
+        public int Quantidade { get; set; }
+        public decimal Valor { get; set; }
+
+        // Só para Jogos e Acessórios
+        public string? Plataforma { get; set; }
+        public int? PrazoGarantiaMeses { get; set; }
+    }
+
 }
 
 // ===================== Repositories/UsuarioRepository.cs =====================
@@ -190,6 +246,54 @@ namespace Lojadegames.Repositories
         }
 
     }
+    public static class ProdutoRepository
+    {
+        static string caminhoDb = "usuarios.db";
+
+        public static void CriarTabelaSeNaoExistir()
+        {
+            using var conexao = new SqliteConnection($"Data Source={caminhoDb}");
+            conexao.Open();
+
+            var comando = conexao.CreateCommand();
+            comando.CommandText = @"
+                CREATE TABLE IF NOT EXISTS Produtos (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CodigoBarras TEXT,
+                    Nome TEXT,
+                    Categoria INTEGER,
+                    Fabricante TEXT,
+                    Quantidade INTEGER,
+                    Valor REAL,
+                    Plataforma TEXT,
+                    PrazoGarantiaMeses INTEGER
+                );";
+            comando.ExecuteNonQuery();
+        }
+
+        public static void Inserir(Produto p)
+        {
+            using var conexao = new SqliteConnection($"Data Source={caminhoDb}");
+            conexao.Open();
+
+            var comando = conexao.CreateCommand();
+            comando.CommandText = @"
+                INSERT INTO Produtos 
+                (CodigoBarras, Nome, Categoria, Fabricante, Quantidade, Valor, Plataforma, PrazoGarantiaMeses)
+                VALUES ($codigo, $nome, $categoria, $fabricante, $quantidade, $valor, $plataforma, $prazo);";
+
+            comando.Parameters.AddWithValue("$codigo", p.CodigoBarras);
+            comando.Parameters.AddWithValue("$nome", p.Nome);
+            comando.Parameters.AddWithValue("$categoria", (int)p.Categoria);
+            comando.Parameters.AddWithValue("$fabricante", p.Fabricante);
+            comando.Parameters.AddWithValue("$quantidade", p.Quantidade);
+            comando.Parameters.AddWithValue("$valor", p.Valor);
+            comando.Parameters.AddWithValue("$plataforma", p.Plataforma ?? (object)DBNull.Value);
+            comando.Parameters.AddWithValue("$prazo", p.PrazoGarantiaMeses ?? (object)DBNull.Value);
+
+            comando.ExecuteNonQuery();
+        }
+    }
 }
 
 // ===================== Services/UsuarioService.cs =====================
@@ -259,6 +363,48 @@ namespace Lojadegames.Services
             if (usuario != null && BCrypt.Net.BCrypt.Verify(senha, usuario.Senha))
                 return usuario;
             return null;
+        }
+    }
+    public static class ProdutoService
+    {
+        static ProdutoService()
+        {
+            ProdutoRepository.CriarTabelaSeNaoExistir();
+        }
+
+        public static void CadastrarProduto()
+        {
+            Produto p = new Produto();
+
+            Console.Write("Código de Barras: ");
+            p.CodigoBarras = Console.ReadLine();
+
+            Console.Write("Nome do Produto: ");
+            p.Nome = Console.ReadLine();
+
+            Console.Write("Fabricante: ");
+            p.Fabricante = Console.ReadLine();
+
+            Console.Write("Quantidade: ");
+            p.Quantidade = int.Parse(Console.ReadLine());
+
+            Console.Write("Valor (R$): ");
+            p.Valor = decimal.Parse(Console.ReadLine());
+
+            Console.WriteLine("Categoria [0] Jogos, [1] Acessorios, [2] ProdutosGeek: ");
+            p.Categoria = (CategoriaProduto)int.Parse(Console.ReadLine());
+
+            if (p.Categoria == CategoriaProduto.Jogos || p.Categoria == CategoriaProduto.Acessorios)
+            {
+                Console.Write("Plataforma: ");
+                p.Plataforma = Console.ReadLine();
+
+                Console.Write("Prazo de Garantia (meses): ");
+                p.PrazoGarantiaMeses = int.Parse(Console.ReadLine());
+            }
+
+            ProdutoRepository.Inserir(p);
+            Console.WriteLine("Produto cadastrado com sucesso!");
         }
     }
 }
