@@ -10,6 +10,7 @@ using Lojadegames.Models;
 using Lojadegames.Repositories;
 using Lojadegames.Services;
 using Microsoft.Data.Sqlite;
+using static Lojadegames.Models.Usuario;
 using static Lojadegames.Repositories.UsuarioRepository;
 
 string? senha, confirmacao;
@@ -61,7 +62,8 @@ void MenuInterno(Usuario usuario)
         Console.Clear();
         Console.WriteLine($"--- MENU PRINCIPAL --- | Usuário: {usuario.Nome} {(usuario.Ehsupervisor ? "(Supervisor)" : "")}");
         Console.WriteLine("[1] Cadastrar produto");
-        Console.WriteLine("[2] Sair do sistema");
+        Console.WriteLine("[2] Cadastrar cliente");
+        Console.WriteLine("[4] Sair do sistema");
         Console.Write("Escolha: ");
 
         if (!int.TryParse(Console.ReadLine(), out int opcao))
@@ -77,6 +79,11 @@ void MenuInterno(Usuario usuario)
                 ProdutoService.CadastrarProduto();
                 break;
             case 2:
+                ClienteService.CadastrarCliente();
+                break;
+            case 3:
+                break;
+            case 4:
                 Console.WriteLine("Saindo...");
                 return; // volta para o menu principal
             default:
@@ -123,6 +130,42 @@ namespace Lojadegames.Models
         {
             string tel = new string((Telefone ?? "").Where(char.IsDigit).ToArray());
             return tel.Length >= 10 && tel.Length <= 11;
+        }
+        public class Cliente
+        {
+            public int Codigo { get; set; }
+            public string Nome { get; set; }
+            public string Rg { get; set; }
+            public string Cpf { get; set; }
+            public string Endereco { get; set; }
+            public string Telefone { get; set; }
+            public string Email { get; set; }
+            public DateTime DataCadastro { get; set; }
+
+            public bool EmailValido() =>
+                !string.IsNullOrEmpty(Email) &&
+                System.Net.Mail.MailAddress.TryCreate(Email, out _);
+
+            public bool CpfValido()
+            {
+                if (string.IsNullOrWhiteSpace(Cpf)) return false;
+                string cpf = new string(Cpf.Where(char.IsDigit).ToArray());
+                if (cpf.Length != 11 || cpf.Distinct().Count() == 1) return false;
+
+                int Soma(int[] pesos) => cpf.Take(pesos.Length).Select((c, i) => (c - '0') * pesos[i]).Sum();
+                int Resto(int soma) => soma % 11 < 2 ? 0 : 11 - (soma % 11);
+
+                int[] peso1 = { 10, 9, 8, 7, 6, 5, 4, 3, 2 };
+                int[] peso2 = { 11, 10, 9, 8, 7, 6, 5, 4, 3, 2 };
+
+                return Resto(Soma(peso1)) == cpf[9] - '0' && Resto(Soma(peso2)) == cpf[10] - '0';
+            }
+
+            public bool TelefoneValido()
+            {
+                string tel = new string((Telefone ?? "").Where(char.IsDigit).ToArray());
+                return tel.Length >= 10 && tel.Length <= 11;
+            }
         }
     }
     public enum CategoriaProduto
@@ -244,7 +287,53 @@ namespace Lojadegames.Repositories
                 return senha;
             }
         }
+        public static class ClienteRepository
+        {
+            static string caminhoDb = "usuarios.db";
 
+            public static void CriarTabelaSeNaoExistir()
+            {
+                using var conexao = new SqliteConnection($"Data Source={caminhoDb}");
+                conexao.Open();
+
+                var comando = conexao.CreateCommand();
+                comando.CommandText = @"
+                CREATE TABLE IF NOT EXISTS Clientes (
+                    Codigo INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Nome TEXT,
+                    Rg TEXT,
+                    Cpf TEXT,
+                    Endereco TEXT,
+                    Telefone TEXT,
+                    Email TEXT,
+                    DataCadastro TEXT
+                );";
+                comando.ExecuteNonQuery();
+            }
+
+            public static void Inserir(Cliente c)
+            {
+                using var conexao = new SqliteConnection($"Data Source={caminhoDb}");
+                conexao.Open();
+
+                var comando = conexao.CreateCommand();
+                comando.CommandText = @"
+                INSERT INTO Clientes 
+                (Nome, Rg, Cpf, Endereco, Telefone, Email, DataCadastro)
+                VALUES 
+                ($nome, $rg, $cpf, $endereco, $telefone, $email, $datacadastro);";
+
+                comando.Parameters.AddWithValue("$nome", c.Nome);
+                comando.Parameters.AddWithValue("$rg", c.Rg);
+                comando.Parameters.AddWithValue("$cpf", c.Cpf);
+                comando.Parameters.AddWithValue("$endereco", c.Endereco);
+                comando.Parameters.AddWithValue("$telefone", c.Telefone);
+                comando.Parameters.AddWithValue("$email", c.Email);
+                comando.Parameters.AddWithValue("$datacadastro", c.DataCadastro.ToString("yyyy-MM-dd"));
+
+                comando.ExecuteNonQuery();
+            }
+        }
     }
     public static class ProdutoRepository
     {
@@ -405,6 +494,56 @@ namespace Lojadegames.Services
 
             ProdutoRepository.Inserir(p);
             Console.WriteLine("Produto cadastrado com sucesso!");
+        }
+    }
+    public static class ClienteService
+    {
+        static ClienteService()
+        {
+            ClienteRepository.CriarTabelaSeNaoExistir();
+        }
+
+        public static void CadastrarCliente()
+        {
+            Cliente cliente = new Cliente();
+
+            Console.Write("Nome: ");
+            cliente.Nome = Console.ReadLine();
+
+            Console.Write("RG: ");
+            cliente.Rg = Console.ReadLine();
+
+            do
+            {
+                Console.Write("CPF: ");
+                cliente.Cpf = Console.ReadLine();
+                if (!cliente.CpfValido())
+                    Console.WriteLine("CPF inválido!");
+            } while (!cliente.CpfValido());
+
+            Console.Write("Endereço: ");
+            cliente.Endereco = Console.ReadLine();
+
+            do
+            {
+                Console.Write("Telefone: ");
+                cliente.Telefone = Console.ReadLine();
+                if (!cliente.TelefoneValido())
+                    Console.WriteLine("Telefone inválido!");
+            } while (!cliente.TelefoneValido());
+
+            do
+            {
+                Console.Write("Email: ");
+                cliente.Email = Console.ReadLine();
+                if (!cliente.EmailValido())
+                    Console.WriteLine("Email inválido!");
+            } while (!cliente.EmailValido());
+
+            cliente.DataCadastro = DateTime.Now;
+
+            ClienteRepository.Inserir(cliente);
+            Console.WriteLine("Cliente cadastrado com sucesso!");
         }
     }
 }
