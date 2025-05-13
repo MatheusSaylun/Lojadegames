@@ -7,6 +7,7 @@
 // ===================== Program.cs =====================
 
 using Lojadegames.Models;
+using Lojadegames.Models.Lojadegames.Models;
 using Lojadegames.Repositories;
 using Lojadegames.Services;
 using Microsoft.Data.Sqlite;
@@ -63,7 +64,8 @@ void MenuInterno(Usuario usuario)
         Console.WriteLine($"--- MENU PRINCIPAL --- | Usuário: {usuario.Nome} {(usuario.Ehsupervisor ? "(Supervisor)" : "")}");
         Console.WriteLine("[1] Cadastrar produto");
         Console.WriteLine("[2] Cadastrar cliente");
-        Console.WriteLine("[4] Sair do sistema");
+        Console.WriteLine("[3] Realizar Venda");
+        Console.WriteLine("[0] Sair do sistema");
         Console.Write("Escolha: ");
 
         if (!int.TryParse(Console.ReadLine(), out int opcao))
@@ -82,8 +84,9 @@ void MenuInterno(Usuario usuario)
                 ClienteService.CadastrarCliente();
                 break;
             case 3:
+                VendaService.RealizarVenda(usuario);
                 break;
-            case 4:
+            case 0:
                 Console.WriteLine("Saindo...");
                 return; // volta para o menu principal
             default:
@@ -188,7 +191,32 @@ namespace Lojadegames.Models
         public string? Plataforma { get; set; }
         public int? PrazoGarantiaMeses { get; set; }
     }
+    namespace Lojadegames.Models
+    {
+        public enum FormaPagamento { Dinheiro, Cartao }
+        public enum StatusPagamento { Pendente, Pago }
+        public enum StatusVenda { EmAndamento, Finalizada }
 
+        public class ItemVenda
+        {
+            public Produto Produto { get; set; }
+            public int Quantidade { get; set; }
+            public decimal Subtotal => Produto.Valor * Quantidade;
+        }
+
+        public class Venda
+        {
+            public string Codigo { get; set; }
+            public Usuario Cliente { get; set; }
+            public List<ItemVenda> Itens { get; set; } = new();
+            public DateTime DataVenda { get; set; } = DateTime.Now;
+            public FormaPagamento FormaPagamento { get; set; }
+            public StatusPagamento StatusPagamento { get; set; } = StatusPagamento.Pendente;
+            public StatusVenda StatusVenda { get; set; } = StatusVenda.EmAndamento;
+
+            public decimal ValorTotal => Itens.Sum(i => i.Subtotal);
+        }
+    }
 }
 
 // ===================== Repositories/UsuarioRepository.cs =====================
@@ -382,6 +410,113 @@ namespace Lojadegames.Repositories
 
             comando.ExecuteNonQuery();
         }
+        public static Produto? BuscarPorCodigoBarras(string codigo)
+        {
+            using var conexao = new SqliteConnection($"Data Source={caminhoDb}");
+            conexao.Open();
+
+            var comando = conexao.CreateCommand();
+            comando.CommandText = "SELECT * FROM Produtos WHERE CodigoBarras = $codigo";
+            comando.Parameters.AddWithValue("$codigo", codigo);
+
+            using var reader = comando.ExecuteReader();
+            if (reader.Read())
+            {
+                return new Produto
+                {
+                    Id = reader.GetInt32(0),
+                    CodigoBarras = reader.GetString(1),
+                    Nome = reader.GetString(2),
+                    Categoria = (CategoriaProduto)reader.GetInt32(3),
+                    Fabricante = reader.GetString(4),
+                    Quantidade = reader.GetInt32(5),
+                    Valor = reader.GetDecimal(6),
+                    Plataforma = reader.IsDBNull(7) ? null : reader.GetString(7),
+                    PrazoGarantiaMeses = reader.IsDBNull(8) ? null : reader.GetInt32(8)
+                };
+            }
+            return null;
+        }
+
+    }
+    public static class VendaRepository
+    {
+        static string caminhoDb = "usuarios.db";
+
+        public static void CriarTabelaSeNaoExistir()
+        {
+            using var conexao = new SqliteConnection($"Data Source={caminhoDb}");
+            conexao.Open();
+
+            var comando = conexao.CreateCommand();
+            comando.CommandText = @"
+                CREATE TABLE IF NOT EXISTS Vendas (
+                    Codigo TEXT PRIMARY KEY,
+                    EmailCliente TEXT,
+                    Data TEXT,
+                    ValorTotal REAL,
+                    FormaPagamento INTEGER,
+                    StatusPagamento INTEGER,
+                    StatusVenda INTEGER
+                );
+
+                CREATE TABLE IF NOT EXISTS ItensVenda (
+                    CodigoVenda TEXT,
+                    CodigoBarras TEXT,
+                    Nome TEXT,
+                    Quantidade INTEGER,
+                    ValorUnitario REAL
+                );
+            ";
+            comando.ExecuteNonQuery();
+        }
+
+        public static void SalvarVenda(Venda venda)
+        {
+            using var conexao = new SqliteConnection($"Data Source={caminhoDb}");
+            conexao.Open();
+
+            var transacao = conexao.BeginTransaction();
+
+            try
+            {
+                var cmdVenda = conexao.CreateCommand();
+                cmdVenda.CommandText = @"
+                    INSERT INTO Vendas (Codigo, EmailCliente, Data, ValorTotal, FormaPagamento, StatusPagamento, StatusVenda)
+                    VALUES ($codigo, $cliente, $data, $valor, $forma, $statusPag, $statusVenda);
+                ";
+                cmdVenda.Parameters.AddWithValue("$codigo", venda.Codigo);
+                cmdVenda.Parameters.AddWithValue("$cliente", venda.Cliente.Email);
+                cmdVenda.Parameters.AddWithValue("$data", venda.DataVenda.ToString("yyyy-MM-dd HH:mm:ss"));
+                cmdVenda.Parameters.AddWithValue("$valor", venda.ValorTotal);
+                cmdVenda.Parameters.AddWithValue("$forma", (int)venda.FormaPagamento);
+                cmdVenda.Parameters.AddWithValue("$statusPag", (int)venda.StatusPagamento);
+                cmdVenda.Parameters.AddWithValue("$statusVenda", (int)venda.StatusVenda);
+                cmdVenda.ExecuteNonQuery();
+
+                foreach (var item in venda.Itens)
+                {
+                    var cmdItem = conexao.CreateCommand();
+                    cmdItem.CommandText = @"
+                        INSERT INTO ItensVenda (CodigoVenda, CodigoBarras, Nome, Quantidade, ValorUnitario)
+                        VALUES ($codigoVenda, $codigoBarras, $nome, $quantidade, $valorUnitario);
+                    ";
+                    cmdItem.Parameters.AddWithValue("$codigoVenda", venda.Codigo);
+                    cmdItem.Parameters.AddWithValue("$codigoBarras", item.Produto.CodigoBarras);
+                    cmdItem.Parameters.AddWithValue("$nome", item.Produto.Nome);
+                    cmdItem.Parameters.AddWithValue("$quantidade", item.Quantidade);
+                    cmdItem.Parameters.AddWithValue("$valorUnitario", item.Produto.Valor);
+                    cmdItem.ExecuteNonQuery();
+                }
+
+                transacao.Commit();
+            }
+            catch
+            {
+                transacao.Rollback();
+                throw;
+            }
+        }
     }
 }
 
@@ -544,6 +679,71 @@ namespace Lojadegames.Services
 
             ClienteRepository.Inserir(cliente);
             Console.WriteLine("Cliente cadastrado com sucesso!");
+        }
+    }
+    public static class VendaService
+    {
+        static VendaService()
+        {
+            VendaRepository.CriarTabelaSeNaoExistir();
+        }
+
+        public static void RealizarVenda(Usuario cliente)
+        {
+            var venda = new Venda
+            {
+                Cliente = cliente,
+                Codigo = Guid.NewGuid().ToString().Substring(0, 8).ToUpper()
+            };
+
+            while (true)
+            {
+                Console.Write("Código de barras do produto (ou 'fim'): ");
+                var cod = Console.ReadLine();
+                if (cod.ToLower() == "fim") break;
+
+                // Buscar produto no repositório (pode implementar essa função depois)
+                var produto = ProdutoRepository.BuscarPorCodigoBarras(cod);
+                if (produto == null)
+                {
+                    Console.WriteLine("Produto não encontrado.");
+                    continue;
+                }
+
+                Console.Write("Quantidade: ");
+                int qtd = int.Parse(Console.ReadLine());
+
+                venda.Itens.Add(new ItemVenda { Produto = produto, Quantidade = qtd });
+            }
+
+            Console.WriteLine("Resumo da venda:");
+            foreach (var item in venda.Itens)
+                Console.WriteLine($"{item.Produto.Nome} - {item.Quantidade} x R${item.Produto.Valor:F2} = R${item.Subtotal:F2}");
+
+            Console.WriteLine($"Total: R${venda.ValorTotal:F2}");
+
+            Console.Write("Forma de pagamento (0=Dinheiro, 1=Cartão): ");
+            venda.FormaPagamento = (FormaPagamento)int.Parse(Console.ReadLine());
+
+            venda.StatusPagamento = StatusPagamento.Pago;
+            venda.StatusVenda = StatusVenda.Finalizada;
+
+            VendaRepository.SalvarVenda(venda);
+
+            Console.WriteLine("Venda registrada com sucesso!");
+        }
+
+        public static bool AutorizarSupervisor()
+        {
+            Console.WriteLine("Email do supervisor: ");
+            var email = Console.ReadLine();
+
+            Console.WriteLine("Senha: ");
+            var senha = UsuarioRepository.Utils.LerSenhaOculta();
+
+            var usuario = UsuarioService.FazerLogin(email, senha);
+
+            return usuario != null && usuario.Ehsupervisor;
         }
     }
 }
